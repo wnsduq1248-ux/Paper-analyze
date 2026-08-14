@@ -14,6 +14,12 @@ type Props = {
 
 type NoteType = "word" | "concept" | "figure";
 
+type HighlightType =
+  | "word"
+  | "concept"
+  | "figure"
+  | "underline";
+
 type HighlightRect = {
   left: number;
   top: number;
@@ -24,7 +30,7 @@ type HighlightRect = {
 type Highlight = {
   id: number;
   page: number;
-  type: NoteType;
+  type: HighlightType;
   text: string;
   rects: HighlightRect[];
 };
@@ -52,10 +58,14 @@ type FigureDrag = {
   currentY: number;
 };
 
+const BLACK_CROSSHAIR_CURSOR =
+  `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Cline x1='8' y1='0' x2='8' y2='16' stroke='black' stroke-width='1.5'/%3E%3Cline x1='0' y1='8' x2='16' y2='8' stroke='black' stroke-width='1.5'/%3E%3C/svg%3E") 8 8, crosshair`;
+
 export default function PdfViewer({ file }: Props) {
   const [numPages, setNumPages] = useState(0);
 
-  const [selectedText, setSelectedText] = useState("");
+  const [selectedText, setSelectedText] =
+    useState("");
 
   const [pendingSelection, setPendingSelection] =
     useState<PendingSelection | null>(null);
@@ -68,7 +78,8 @@ export default function PdfViewer({ file }: Props) {
   const [showMemoBox, setShowMemoBox] =
     useState(false);
 
-  const [memoText, setMemoText] = useState("");
+  const [memoText, setMemoText] =
+    useState("");
 
   const [currentType, setCurrentType] =
     useState<NoteType>("word");
@@ -82,14 +93,25 @@ export default function PdfViewer({ file }: Props) {
   const [highlights, setHighlights] =
     useState<Highlight[]>([]);
 
-  const [pendingHighlightId, setPendingHighlightId] =
-    useState<number | null>(null);
+  const [
+    pendingHighlightId,
+    setPendingHighlightId,
+  ] = useState<number | null>(null);
 
   const [loaded, setLoaded] =
     useState(false);
 
   // ==============================
-  // 피규어 선택 모드
+  // 수정 중인 메모
+  // ==============================
+
+  const [
+    editingNoteId,
+    setEditingNoteId,
+  ] = useState<number | null>(null);
+
+  // ==============================
+  // 피규어 선택
   // ==============================
 
   const [figureMode, setFigureMode] =
@@ -97,6 +119,33 @@ export default function PdfViewer({ file }: Props) {
 
   const [figureDrag, setFigureDrag] =
     useState<FigureDrag | null>(null);
+
+  // ==============================
+  // PDF hover
+  // ==============================
+
+  const [
+    hoveredHighlightId,
+    setHoveredHighlightId,
+  ] = useState<number | null>(null);
+
+  // ==============================
+  // Study Note hover
+  // ==============================
+
+  const [
+    hoveredNoteId,
+    setHoveredNoteId,
+  ] = useState<number | null>(null);
+
+  // ==============================
+  // 피규어 이동 후 강조
+  // ==============================
+
+  const [
+    focusedFigureId,
+    setFocusedFigureId,
+  ] = useState<number | null>(null);
 
   // ==============================
   // PDF별 저장 키
@@ -111,7 +160,7 @@ export default function PdfViewer({ file }: Props) {
     file.lastModified;
 
   // ==============================
-  // 저장된 데이터 불러오기
+  // 저장 데이터 불러오기
   // ==============================
 
   useEffect(() => {
@@ -128,10 +177,16 @@ export default function PdfViewer({ file }: Props) {
     }
 
     try {
-      const data = JSON.parse(saved);
+      const data =
+        JSON.parse(saved);
 
-      setNotes(data.notes ?? []);
-      setHighlights(data.highlights ?? []);
+      setNotes(
+        data.notes ?? []
+      );
+
+      setHighlights(
+        data.highlights ?? []
+      );
     } catch {
       setNotes([]);
       setHighlights([]);
@@ -141,20 +196,18 @@ export default function PdfViewer({ file }: Props) {
   }, [storageKey]);
 
   // ==============================
-  // 변경될 때마다 자동 저장
+  // 자동 저장
   // ==============================
 
   useEffect(() => {
     if (!loaded) return;
 
-    const data = {
-      notes,
-      highlights,
-    };
-
     localStorage.setItem(
       storageKey,
-      JSON.stringify(data)
+      JSON.stringify({
+        notes,
+        highlights,
+      })
     );
   }, [
     notes,
@@ -177,12 +230,24 @@ export default function PdfViewer({ file }: Props) {
   };
 
   // ==============================
-  // PDF 텍스트 선택
+  // Highlight → Note 찾기
+  // ==============================
+
+  const getNoteByHighlightId = (
+    highlightId: number
+  ) => {
+    return notes.find(
+      (note) =>
+        note.highlightId ===
+        highlightId
+    );
+  };
+
+  // ==============================
+  // 텍스트 선택
   // ==============================
 
   const handleMouseUp = () => {
-    // 피규어 선택 모드일 때는
-    // 텍스트 선택 기능 막기
     if (figureMode) return;
 
     if (showMemoBox) return;
@@ -198,14 +263,18 @@ export default function PdfViewer({ file }: Props) {
     }
 
     const text =
-      selection.toString().trim();
+      selection
+        .toString()
+        .trim();
 
     if (!text) return;
 
     const range =
       selection.getRangeAt(0);
 
-    let startElement: Element | null = null;
+    let startElement:
+      | Element
+      | null = null;
 
     if (
       range.startContainer.nodeType ===
@@ -214,7 +283,8 @@ export default function PdfViewer({ file }: Props) {
       startElement =
         range.startContainer.parentElement;
     } else if (
-      range.startContainer instanceof Element
+      range.startContainer instanceof
+      Element
     ) {
       startElement =
         range.startContainer;
@@ -228,18 +298,24 @@ export default function PdfViewer({ file }: Props) {
       );
 
     if (
-      !(pageWrapper instanceof HTMLElement)
+      !(
+        pageWrapper instanceof
+        HTMLElement
+      )
     ) {
       return;
     }
 
-    const page = Number(
-      pageWrapper.dataset.paperPage
-    );
+    const page =
+      Number(
+        pageWrapper.dataset.paperPage
+      );
 
     if (!page) return;
 
-    let endElement: Element | null = null;
+    let endElement:
+      | Element
+      | null = null;
 
     if (
       range.endContainer.nodeType ===
@@ -248,7 +324,8 @@ export default function PdfViewer({ file }: Props) {
       endElement =
         range.endContainer.parentElement;
     } else if (
-      range.endContainer instanceof Element
+      range.endContainer instanceof
+      Element
     ) {
       endElement =
         range.endContainer;
@@ -262,10 +339,11 @@ export default function PdfViewer({ file }: Props) {
       );
 
     if (
-      endPageWrapper !== pageWrapper
+      endPageWrapper !==
+      pageWrapper
     ) {
       alert(
-        "형광펜은 한 페이지 안에서만 선택해줘."
+        "선택은 한 페이지 안에서만 해줘."
       );
 
       clearSelection();
@@ -281,7 +359,8 @@ export default function PdfViewer({ file }: Props) {
         range.getClientRects()
       );
 
-    const rects: HighlightRect[] =
+    const rects:
+      HighlightRect[] =
       clientRects
         .filter(
           (rect) =>
@@ -304,7 +383,11 @@ export default function PdfViewer({ file }: Props) {
             rect.height,
         }));
 
-    if (rects.length === 0) return;
+    if (
+      rects.length === 0
+    ) {
+      return;
+    }
 
     setSelectedText(text);
 
@@ -332,17 +415,21 @@ export default function PdfViewer({ file }: Props) {
   };
 
   // ==============================
-  // 단어 / 개념 추가
+  // 단어 / 개념
   // ==============================
 
   const startNote = (
     type: "word" | "concept"
   ) => {
-    if (!pendingSelection) return;
+    if (!pendingSelection) {
+      return;
+    }
 
-    const id = Date.now();
+    const id =
+      Date.now();
 
-    const newHighlight: Highlight = {
+    const newHighlight:
+      Highlight = {
       id,
 
       page:
@@ -357,10 +444,12 @@ export default function PdfViewer({ file }: Props) {
         pendingSelection.rects,
     };
 
-    setHighlights((prev) => [
-      ...prev,
-      newHighlight,
-    ]);
+    setHighlights(
+      (prev) => [
+        ...prev,
+        newHighlight,
+      ]
+    );
 
     setSelectedText(
       pendingSelection.text
@@ -368,7 +457,13 @@ export default function PdfViewer({ file }: Props) {
 
     setCurrentType(type);
 
-    setPendingHighlightId(id);
+    setPendingHighlightId(
+      id
+    );
+
+    setEditingNoteId(
+      null
+    );
 
     window
       .getSelection()
@@ -378,11 +473,51 @@ export default function PdfViewer({ file }: Props) {
   };
 
   // ==============================
-  // 피규어 드래그 시작
+  // 밑줄
+  // ==============================
+
+  const addUnderline = () => {
+    if (!pendingSelection) {
+      return;
+    }
+
+    const id =
+      Date.now();
+
+    const newHighlight:
+      Highlight = {
+      id,
+
+      page:
+        pendingSelection.page,
+
+      type:
+        "underline",
+
+      text:
+        pendingSelection.text,
+
+      rects:
+        pendingSelection.rects,
+    };
+
+    setHighlights(
+      (prev) => [
+        ...prev,
+        newHighlight,
+      ]
+    );
+
+    clearSelection();
+  };
+
+  // ==============================
+  // 피규어 시작
   // ==============================
 
   const startFigureDrag = (
-    event: React.MouseEvent<HTMLDivElement>,
+    event:
+      React.MouseEvent<HTMLDivElement>,
     page: number
   ) => {
     if (!figureMode) return;
@@ -393,7 +528,8 @@ export default function PdfViewer({ file }: Props) {
     event.stopPropagation();
 
     const rect =
-      event.currentTarget.getBoundingClientRect();
+      event.currentTarget
+        .getBoundingClientRect();
 
     const x =
       event.clientX -
@@ -413,11 +549,12 @@ export default function PdfViewer({ file }: Props) {
   };
 
   // ==============================
-  // 피규어 드래그 이동
+  // 피규어 이동
   // ==============================
 
   const moveFigureDrag = (
-    event: React.MouseEvent<HTMLDivElement>,
+    event:
+      React.MouseEvent<HTMLDivElement>,
     page: number
   ) => {
     if (!figureMode) return;
@@ -425,7 +562,8 @@ export default function PdfViewer({ file }: Props) {
     if (!figureDrag) return;
 
     if (
-      figureDrag.page !== page
+      figureDrag.page !==
+      page
     ) {
       return;
     }
@@ -434,7 +572,8 @@ export default function PdfViewer({ file }: Props) {
     event.stopPropagation();
 
     const rect =
-      event.currentTarget.getBoundingClientRect();
+      event.currentTarget
+        .getBoundingClientRect();
 
     const x =
       event.clientX -
@@ -444,23 +583,28 @@ export default function PdfViewer({ file }: Props) {
       event.clientY -
       rect.top;
 
-    setFigureDrag((prev) => {
-      if (!prev) return null;
+    setFigureDrag(
+      (prev) => {
+        if (!prev) {
+          return null;
+        }
 
-      return {
-        ...prev,
-        currentX: x,
-        currentY: y,
-      };
-    });
+        return {
+          ...prev,
+          currentX: x,
+          currentY: y,
+        };
+      }
+    );
   };
 
   // ==============================
-  // 피규어 드래그 종료
+  // 피규어 종료
   // ==============================
 
   const finishFigureDrag = (
-    event: React.MouseEvent<HTMLDivElement>,
+    event:
+      React.MouseEvent<HTMLDivElement>,
     page: number
   ) => {
     if (!figureMode) return;
@@ -468,7 +612,8 @@ export default function PdfViewer({ file }: Props) {
     if (!figureDrag) return;
 
     if (
-      figureDrag.page !== page
+      figureDrag.page !==
+      page
     ) {
       return;
     }
@@ -502,7 +647,6 @@ export default function PdfViewer({ file }: Props) {
 
     setFigureDrag(null);
 
-    // 너무 작은 드래그는 무시
     if (
       width < 10 ||
       height < 10
@@ -510,16 +654,22 @@ export default function PdfViewer({ file }: Props) {
       return;
     }
 
-    const id = Date.now();
+    const id =
+      Date.now();
 
     const figureText =
       `Figure - Page ${page}`;
 
-    const newHighlight: Highlight = {
+    const newHighlight:
+      Highlight = {
       id,
       page,
-      type: "figure",
-      text: figureText,
+
+      type:
+        "figure",
+
+      text:
+        figureText,
 
       rects: [
         {
@@ -531,10 +681,12 @@ export default function PdfViewer({ file }: Props) {
       ],
     };
 
-    setHighlights((prev) => [
-      ...prev,
-      newHighlight,
-    ]);
+    setHighlights(
+      (prev) => [
+        ...prev,
+        newHighlight,
+      ]
+    );
 
     setSelectedText(
       figureText
@@ -546,6 +698,10 @@ export default function PdfViewer({ file }: Props) {
 
     setPendingHighlightId(
       id
+    );
+
+    setEditingNoteId(
+      null
     );
 
     setMenuPosition({
@@ -562,22 +718,23 @@ export default function PdfViewer({ file }: Props) {
 
     setShowMemoBox(true);
 
-    // 한 번 선택 후 자동으로
-    // 피규어 모드 종료
     setFigureMode(false);
   };
 
   // ==============================
-  // 현재 드래그 중인 피규어 사각형
+  // 드래그 사각형
   // ==============================
 
   const getFigureDragRect = (
     page: number
   ): HighlightRect | null => {
-    if (!figureDrag) return null;
+    if (!figureDrag) {
+      return null;
+    }
 
     if (
-      figureDrag.page !== page
+      figureDrag.page !==
+      page
     ) {
       return null;
     }
@@ -610,13 +767,116 @@ export default function PdfViewer({ file }: Props) {
   };
 
   // ==============================
+  // 메모 수정 열기
+  // ==============================
+
+  const openEditMemo = (
+    event:
+      React.MouseEvent,
+    note: Note
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setHoveredHighlightId(
+      null
+    );
+
+    setHoveredNoteId(
+      null
+    );
+
+    setEditingNoteId(
+      note.id
+    );
+
+    setPendingHighlightId(
+      null
+    );
+
+    setSelectedText(
+      note.text
+    );
+
+    setCurrentType(
+      note.type
+    );
+
+    setMemoText(
+      note.memo
+    );
+
+    setMenuPosition({
+      x:
+        event.clientX +
+        window.scrollX +
+        10,
+
+      y:
+        event.clientY +
+        window.scrollY +
+        10,
+    });
+
+    setShowMemoBox(
+      true
+    );
+  };
+
+  // ==============================
   // 메모 저장
   // ==============================
 
   const saveMemo = () => {
+    if (!memoText.trim()) {
+      return;
+    }
+
+    // ============================
+    // 기존 메모 수정
+    // ============================
+
     if (
-      !memoText.trim() ||
-      pendingHighlightId === null
+      editingNoteId !==
+      null
+    ) {
+      setNotes(
+        (prev) =>
+          prev.map(
+            (note) =>
+              note.id ===
+              editingNoteId
+                ? {
+                    ...note,
+                    memo:
+                      memoText.trim(),
+                  }
+                : note
+          )
+      );
+
+      setEditingNoteId(
+        null
+      );
+
+      setMemoText("");
+
+      setShowMemoBox(
+        false
+      );
+
+      clearSelection();
+
+      return;
+    }
+
+    // ============================
+    // 새 메모
+    // ============================
+
+    if (
+      pendingHighlightId ===
+      null
     ) {
       return;
     }
@@ -632,8 +892,10 @@ export default function PdfViewer({ file }: Props) {
       return;
     }
 
-    const newNote: Note = {
-      id: Date.now(),
+    const newNote:
+      Note = {
+      id:
+        Date.now(),
 
       highlightId:
         pendingHighlightId,
@@ -651,77 +913,124 @@ export default function PdfViewer({ file }: Props) {
         targetHighlight.page,
     };
 
-    setNotes((prev) => [
-      ...prev,
-      newNote,
-    ]);
+    setNotes(
+      (prev) => [
+        ...prev,
+        newNote,
+      ]
+    );
 
     setMemoText("");
 
-    setShowMemoBox(false);
+    setShowMemoBox(
+      false
+    );
 
-    setPendingHighlightId(null);
+    setPendingHighlightId(
+      null
+    );
 
     clearSelection();
   };
 
   // ==============================
-  // 메모 작성 취소
+  // 취소
   // ==============================
 
   const cancelMemo = () => {
-    // 방금 만든 표시도 삭제
+    // 수정 중이면
+    // 기존 highlight 삭제 안 함
+
     if (
-      pendingHighlightId !== null
+      editingNoteId !==
+      null
     ) {
-      setHighlights((prev) =>
-        prev.filter(
-          (highlight) =>
-            highlight.id !==
-            pendingHighlightId
-        )
+      setEditingNoteId(
+        null
+      );
+
+      setMemoText("");
+
+      setShowMemoBox(
+        false
+      );
+
+      clearSelection();
+
+      return;
+    }
+
+    // 새 메모 작성 취소
+
+    if (
+      pendingHighlightId !==
+      null
+    ) {
+      setHighlights(
+        (prev) =>
+          prev.filter(
+            (highlight) =>
+              highlight.id !==
+              pendingHighlightId
+          )
       );
     }
 
-    setPendingHighlightId(null);
+    setPendingHighlightId(
+      null
+    );
 
     setMemoText("");
 
-    setShowMemoBox(false);
+    setShowMemoBox(
+      false
+    );
 
     clearSelection();
   };
 
   // ==============================
   // 메모 삭제
-  // 표시도 같이 삭제
   // ==============================
 
   const deleteNote = (
     note: Note
   ) => {
-    setNotes((prev) =>
-      prev.filter(
-        (item) =>
-          item.id !== note.id
-      )
+    setNotes(
+      (prev) =>
+        prev.filter(
+          (item) =>
+            item.id !==
+            note.id
+        )
     );
 
-    setHighlights((prev) =>
-      prev.filter(
-        (highlight) =>
-          highlight.id !==
-          note.highlightId
-      )
+    setHighlights(
+      (prev) =>
+        prev.filter(
+          (highlight) =>
+            highlight.id !==
+            note.highlightId
+        )
+    );
+
+    setHoveredNoteId(
+      null
+    );
+
+    setHoveredHighlightId(
+      null
     );
   };
 
   // ==============================
-  // 텍스트 형광펜 지우개
+  // 지우개
   // ==============================
 
   const eraseHighlight = () => {
-    if (!pendingSelection) return;
+    if (!pendingSelection) {
+      return;
+    }
 
     const selection =
       pendingSelection;
@@ -729,8 +1038,6 @@ export default function PdfViewer({ file }: Props) {
     const targets =
       highlights.filter(
         (highlight) => {
-          // 피규어는 텍스트 지우개로
-          // 지우지 않음
           if (
             highlight.type ===
             "figure"
@@ -746,9 +1053,13 @@ export default function PdfViewer({ file }: Props) {
           }
 
           return highlight.rects.some(
-            (highlightRect) =>
+            (
+              highlightRect
+            ) =>
               selection.rects.some(
-                (selectRect) => {
+                (
+                  selectRect
+                ) => {
                   const noOverlap =
                     highlightRect.left +
                       highlightRect.width <
@@ -786,29 +1097,74 @@ export default function PdfViewer({ file }: Props) {
           target.id
       );
 
-    setHighlights((prev) =>
-      prev.filter(
-        (highlight) =>
-          !ids.includes(
-            highlight.id
-          )
-      )
+    setHighlights(
+      (prev) =>
+        prev.filter(
+          (highlight) =>
+            !ids.includes(
+              highlight.id
+            )
+        )
     );
 
-    setNotes((prev) =>
-      prev.filter(
-        (note) =>
-          !ids.includes(
-            note.highlightId
-          )
-      )
+    setNotes(
+      (prev) =>
+        prev.filter(
+          (note) =>
+            !ids.includes(
+              note.highlightId
+            )
+        )
     );
 
     clearSelection();
   };
 
   // ==============================
-  // Notes 필터
+  // 피규어로 이동
+  // ==============================
+
+  const goToFigure = (
+    note: Note
+  ) => {
+    if (
+      note.type !==
+      "figure"
+    ) {
+      return;
+    }
+
+    const element =
+      document.getElementById(
+        `figure-highlight-${note.highlightId}`
+      );
+
+    if (!element) return;
+
+    element.scrollIntoView({
+      behavior:
+        "smooth",
+
+      block:
+        "center",
+    });
+
+    setFocusedFigureId(
+      note.highlightId
+    );
+
+    window.setTimeout(
+      () => {
+        setFocusedFigureId(
+          null
+        );
+      },
+      1600
+    );
+  };
+
+  // ==============================
+  // 필터
   // ==============================
 
   const filteredNotes =
@@ -819,198 +1175,137 @@ export default function PdfViewer({ file }: Props) {
     );
 
   return (
-    <div>
-      {/* ======================
-          위쪽 도구
-      ====================== */}
+    <div
+      className="
+        flex
+        gap-6
+      "
+      onMouseUp={
+        handleMouseUp
+      }
+    >
+      {/* ==========================
+          PDF
+      ========================== */}
 
-      <div
-        className="
-          flex
-          items-center
-          gap-3
-          mb-5
-        "
-      >
-        <button
-          className={`
-            px-4
-            py-2
-            rounded-lg
-            border
-            font-medium
+      <div className="flex-1">
 
-            ${
-              figureMode
-                ? "bg-blue-600 text-white border-blue-600"
-                : "bg-white hover:bg-gray-50"
-            }
-          `}
-          onClick={() => {
-            setFigureMode(
-              !figureMode
-            );
-
-            clearSelection();
-          }}
+        <div
+          className="
+            bg-white
+            p-4
+            rounded-xl
+            shadow
+          "
         >
-          {figureMode
-            ? "피규어 선택 중..."
-            : "피규어 선택"}
-        </button>
 
-        {figureMode && (
-          <span
-            className="
-              text-sm
-              text-blue-600
-            "
-          >
-            PDF에서 원하는 그림 영역을
-            마우스로 드래그해.
-          </span>
-        )}
-      </div>
-
-      <div
-        className="flex gap-6"
-        onMouseUp={
-          handleMouseUp
-        }
-      >
-        {/* ======================
-            PDF 영역
-        ====================== */}
-
-        <div className="flex-1">
-
-          <div
-            className="
-              bg-white
-              p-4
-              rounded-xl
-              shadow
-            "
+          <Document
+            file={file}
+            onLoadSuccess={({
+              numPages,
+            }) => {
+              setNumPages(
+                numPages
+              );
+            }}
           >
 
-            <Document
-              file={file}
-              onLoadSuccess={({
-                numPages,
-              }) => {
-                setNumPages(
-                  numPages
-                );
-              }}
-            >
+            {Array.from(
+              {
+                length:
+                  numPages,
+              },
 
-              {Array.from(
-                {
-                  length:
-                    numPages,
-                },
+              (_, index) => {
+                const page =
+                  index + 1;
 
-                (_, index) => {
-                  const page =
-                    index + 1;
-
-                  const pageHighlights =
-                    highlights.filter(
-                      (highlight) =>
-                        highlight.page ===
-                        page
-                    );
-
-                  const dragRect =
-                    getFigureDragRect(
+                const pageHighlights =
+                  highlights.filter(
+                    (highlight) =>
+                      highlight.page ===
                       page
-                    );
+                  );
 
-                  return (
-                    <div
-                      key={page}
-                      data-paper-page={
+                const dragRect =
+                  getFigureDragRect(
+                    page
+                  );
+
+                return (
+                  <div
+                    key={page}
+
+                    data-paper-page={
+                      page
+                    }
+
+                    className="
+                      relative
+                      inline-block
+                      mb-6
+                    "
+                  >
+
+                    <Page
+                      pageNumber={
                         page
                       }
+
+                      width={
+                        900
+                      }
+
+                      renderAnnotationLayer={
+                        false
+                      }
+                    />
+
+                    {/* ==========================
+                        Overlay
+                    ========================== */}
+
+                    <div
                       className="
-                        relative
-                        inline-block
-                        mb-6
+                        absolute
+                        inset-0
+                        z-10
+                        pointer-events-none
                       "
                     >
 
-                      <Page
-                        pageNumber={
-                          page
-                        }
-                        width={900}
-                        renderAnnotationLayer={
-                          false
-                        }
-                      />
+                      {pageHighlights.map(
+                        (
+                          highlight
+                        ) =>
+                          highlight.rects.map(
+                            (
+                              rect,
+                              rectIndex
+                            ) => {
+                              const note =
+                                getNoteByHighlightId(
+                                  highlight.id
+                                );
 
-                      {/* ======================
-                          저장된 표시 Overlay
-                      ====================== */}
+                              const isHovered =
+                                hoveredHighlightId ===
+                                highlight.id;
 
-                      <div
-                        className="
-                          absolute
-                          inset-0
-                          pointer-events-none
-                          z-10
-                        "
-                      >
-                        {pageHighlights.map(
-                          (
-                            highlight
-                          ) =>
-                            highlight.rects.map(
-                              (
-                                rect,
-                                rectIndex
-                              ) => {
-                                // 피규어
-                                if (
-                                  highlight.type ===
-                                  "figure"
-                                ) {
-                                  return (
-                                    <div
-                                      key={`${highlight.id}-${rectIndex}`}
-                                      className="
-                                        absolute
-                                        border-2
-                                        border-blue-500
-                                        rounded
-                                      "
-                                      style={{
-                                        left:
-                                          rect.left,
+                              // =====================
+                              // 밑줄
+                              // =====================
 
-                                        top:
-                                          rect.top +1 ,
-
-                                        width:
-                                          rect.width,
-
-                                        height:
-                                           Math.max(rect.height - 6, 1),
-
-                                        backgroundColor:
-                                          "rgba(59, 130, 246, 0.06)",
-                                      }}
-                                    />
-                                  );
-                                }
-
-                                // 단어 / 개념
+                              if (
+                                highlight.type ===
+                                "underline"
+                              ) {
                                 return (
                                   <div
                                     key={`${highlight.id}-${rectIndex}`}
                                     className="
                                       absolute
-                                      rounded-sm
+                                      pointer-events-none
                                     "
                                     style={{
                                       left:
@@ -1025,111 +1320,421 @@ export default function PdfViewer({ file }: Props) {
                                       height:
                                         rect.height,
 
-                                      backgroundColor:
-                                        highlight.type ===
-                                        "word"
-                                          ? "rgba(255, 230, 0, 0.30)"
-                                          : "rgba(255, 70, 70, 0.25)",
+                                      borderBottom:
+                                        "2px solid rgba(30, 30, 30, 0.9)",
                                     }}
                                   />
                                 );
                               }
-                            )
-                        )}
 
-                        {/* 드래그 중인 피규어 */}
+                              // =====================
+                              // 피규어
+                              // =====================
 
-                        {dragRect && (
-                          <div
-                            className="
-                              absolute
-                              border-2
-                              border-blue-600
-                              bg-blue-200/20
-                              rounded
-                            "
-                            style={{
-                              left:
-                                dragRect.left,
+                              if (
+                                highlight.type ===
+                                "figure"
+                              ) {
+                                const isFocused =
+                                  focusedFigureId ===
+                                  highlight.id;
 
-                              top:
-                                dragRect.top,
+                                return (
+                                  <div
+                                    id={`figure-highlight-${highlight.id}`}
 
-                              width:
-                                dragRect.width,
+                                    key={`${highlight.id}-${rectIndex}`}
 
-                              height:
-                                dragRect.height,
-                            }}
-                          />
-                        )}
-                      </div>
+                                    className="
+                                      absolute
+                                      rounded
+                                      pointer-events-auto
+                                    "
 
-                      {/* ======================
-                          피규어 선택용 마우스 레이어
-                      ====================== */}
+                                    style={{
+                                      left:
+                                        rect.left,
 
-                      {figureMode && (
+                                      top:
+                                        rect.top,
+
+                                      width:
+                                        rect.width,
+
+                                      height:
+                                        rect.height,
+
+                                      border:
+                                        isFocused
+                                          ? "4px solid rgb(37, 99, 235)"
+                                          : "2px solid rgb(59, 130, 246)",
+
+                                      backgroundColor:
+                                        isFocused
+                                          ? "rgba(59, 130, 246, 0.16)"
+                                          : "rgba(59, 130, 246, 0.06)",
+
+                                      transition:
+                                        "all 0.2s ease",
+                                    }}
+
+                                    onMouseEnter={() =>
+                                      setHoveredHighlightId(
+                                        highlight.id
+                                      )
+                                    }
+
+                                    onMouseLeave={() =>
+                                      setHoveredHighlightId(
+                                        null
+                                      )
+                                    }
+                                  >
+
+                                    {isHovered &&
+                                      note && (
+
+                                        <div
+                                          className="
+                                            absolute
+                                            left-0
+                                            bottom-full
+                                            mb-2
+                                            w-72
+                                            bg-black
+                                            text-white
+                                            text-sm
+                                            p-3
+                                            rounded-lg
+                                            shadow-xl
+                                            z-50
+                                          "
+                                        >
+
+                                          <div
+                                            className="
+                                              flex
+                                              items-center
+                                              justify-between
+                                              gap-3
+                                              mb-2
+                                            "
+                                          >
+
+                                            <div
+                                              className="
+                                                font-semibold
+                                              "
+                                            >
+                                              Figure · Page{" "}
+                                              {
+                                                note.page
+                                              }
+                                            </div>
+
+                                            <button
+                                              className="
+                                                text-xs
+                                                shrink-0
+                                                text-blue-300
+                                                hover:text-white
+                                              "
+
+                                              onClick={(
+                                                event
+                                              ) =>
+                                                openEditMemo(
+                                                  event,
+                                                  note
+                                                )
+                                              }
+                                            >
+                                              수정
+                                            </button>
+
+                                          </div>
+
+                                          <div
+                                            className="
+                                              whitespace-pre-wrap
+                                            "
+                                          >
+                                            {
+                                              note.memo
+                                            }
+                                          </div>
+
+                                        </div>
+
+                                      )}
+
+                                  </div>
+                                );
+                              }
+
+                              // =====================
+                              // 단어 / 개념
+                              // =====================
+
+                              return (
+                                <div
+                                  key={`${highlight.id}-${rectIndex}`}
+
+                                  className="
+                                    absolute
+                                    rounded-sm
+                                    pointer-events-auto
+                                  "
+
+                                  style={{
+                                    left:
+                                      rect.left,
+
+                                    top:
+                                      rect.top,
+
+                                    width:
+                                      rect.width,
+
+                                    height:
+                                      rect.height,
+
+                                    backgroundColor:
+                                      highlight.type ===
+                                      "word"
+                                        ? "rgba(255, 230, 0, 0.30)"
+                                        : "rgba(255, 70, 70, 0.25)",
+
+                                    cursor:
+                                      note
+                                        ? "help"
+                                        : "default",
+                                  }}
+
+                                  onMouseEnter={() =>
+                                    setHoveredHighlightId(
+                                      highlight.id
+                                    )
+                                  }
+
+                                  onMouseLeave={() =>
+                                    setHoveredHighlightId(
+                                      null
+                                    )
+                                  }
+                                >
+
+                                  {isHovered &&
+                                    note &&
+                                    rectIndex ===
+                                      0 && (
+
+                                      <div
+                                        className="
+                                          absolute
+                                          left-0
+                                          bottom-full
+                                          mb-2
+                                          w-72
+                                          bg-black
+                                          text-white
+                                          text-sm
+                                          p-3
+                                          rounded-lg
+                                          shadow-xl
+                                          z-50
+                                        "
+                                      >
+
+                                        {/* 제목 + 수정 */}
+
+                                        <div
+                                          className="
+                                            flex
+                                            items-start
+                                            justify-between
+                                            gap-3
+                                            mb-2
+                                          "
+                                        >
+
+                                          <div
+                                            className="
+                                              font-semibold
+                                              break-words
+                                              min-w-0
+                                            "
+                                          >
+                                            {
+                                              note.text
+                                            }
+                                          </div>
+
+                                          <button
+                                            className="
+                                              text-xs
+                                              text-blue-300
+                                              hover:text-white
+                                              shrink-0
+                                            "
+
+                                            onClick={(
+                                              event
+                                            ) =>
+                                              openEditMemo(
+                                                event,
+                                                note
+                                              )
+                                            }
+                                          >
+                                            수정
+                                          </button>
+
+                                        </div>
+
+                                        <div
+                                          className="
+                                            whitespace-pre-wrap
+                                          "
+                                        >
+                                          {
+                                            note.memo
+                                          }
+                                        </div>
+
+                                      </div>
+
+                                    )}
+
+                                </div>
+                              );
+                            }
+                          )
+                      )}
+
+                      {/* 드래그 중 피규어 */}
+
+                      {dragRect && (
                         <div
                           className="
                             absolute
-                            inset-0
-                            z-30
-                            cursor-crosshair
+                            border-2
+                            border-blue-600
+                            bg-blue-200/20
+                            rounded
                           "
-                          onMouseDown={(
-                            event
-                          ) =>
-                            startFigureDrag(
-                              event,
-                              page
-                            )
-                          }
-                          onMouseMove={(
-                            event
-                          ) =>
-                            moveFigureDrag(
-                              event,
-                              page
-                            )
-                          }
-                          onMouseUp={(
-                            event
-                          ) =>
-                            finishFigureDrag(
-                              event,
-                              page
-                            )
-                          }
+
+                          style={{
+                            left:
+                              dragRect.left,
+
+                            top:
+                              dragRect.top,
+
+                            width:
+                              dragRect.width,
+
+                            height:
+                              dragRect.height,
+                          }}
                         />
                       )}
+
                     </div>
-                  );
-                }
-              )}
 
-            </Document>
+                    {/* 피규어 선택 */}
 
-          </div>
+                    {figureMode && (
+                      <div
+                        className="
+                          absolute
+                          inset-0
+                          z-30
+                        "
+
+                        style={{
+                          cursor:
+                            BLACK_CROSSHAIR_CURSOR,
+                        }}
+
+                        onMouseDown={(
+                          event
+                        ) =>
+                          startFigureDrag(
+                            event,
+                            page
+                          )
+                        }
+
+                        onMouseMove={(
+                          event
+                        ) =>
+                          moveFigureDrag(
+                            event,
+                            page
+                          )
+                        }
+
+                        onMouseUp={(
+                          event
+                        ) =>
+                          finishFigureDrag(
+                            event,
+                            page
+                          )
+                        }
+                      />
+                    )}
+
+                  </div>
+                );
+              }
+            )}
+
+          </Document>
 
         </div>
 
-        {/* ======================
-            Study Notes
-        ====================== */}
+      </div>
 
-        <div className="w-80">
+      {/* ==========================
+          Study Notes
+      ========================== */}
+
+      <div
+        className="
+          w-80
+          shrink-0
+        "
+      >
+
+        <div
+          className="
+            bg-white
+            rounded-xl
+            shadow
+            sticky
+            top-4
+            h-[calc(100vh-2rem)]
+            flex
+            flex-col
+            overflow-hidden
+          "
+        >
+
+          {/* 상단 고정 */}
 
           <div
             className="
-              bg-white
-              rounded-xl
-              shadow
               p-4
-              sticky
-              top-4
+              pb-3
+              shrink-0
+              border-b
+              bg-white
+              z-10
             "
           >
+
             <h2
               className="
                 text-xl
@@ -1140,15 +1745,56 @@ export default function PdfViewer({ file }: Props) {
               Study Notes
             </h2>
 
-            {/* ======================
-                단어 / 개념 / 피규어 탭
-            ====================== */}
+            {/* 피규어 */}
+
+            <button
+              className={`
+                w-full
+                px-4
+                py-2
+                mb-3
+                rounded-lg
+                border
+                font-medium
+
+                ${
+                  figureMode
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white hover:bg-gray-50"
+                }
+              `}
+
+              onClick={() => {
+                setFigureMode(
+                  !figureMode
+                );
+
+                clearSelection();
+              }}
+            >
+              {figureMode
+                ? "피규어 선택 중..."
+                : "+ 피규어 선택"}
+            </button>
+
+            {figureMode && (
+              <div
+                className="
+                  text-xs
+                  text-blue-600
+                  mb-3
+                "
+              >
+                PDF에서 원하는 영역을 드래그해.
+              </div>
+            )}
+
+            {/* 탭 */}
 
             <div
               className="
                 flex
                 gap-2
-                mb-5
               "
             >
 
@@ -1167,6 +1813,7 @@ export default function PdfViewer({ file }: Props) {
                       : "bg-gray-100"
                   }
                 `}
+
                 onClick={() =>
                   setViewType(
                     "word"
@@ -1191,6 +1838,7 @@ export default function PdfViewer({ file }: Props) {
                       : "bg-gray-100"
                   }
                 `}
+
                 onClick={() =>
                   setViewType(
                     "concept"
@@ -1215,6 +1863,7 @@ export default function PdfViewer({ file }: Props) {
                       : "bg-gray-100"
                   }
                 `}
+
                 onClick={() =>
                   setViewType(
                     "figure"
@@ -1226,174 +1875,242 @@ export default function PdfViewer({ file }: Props) {
 
             </div>
 
+          </div>
+
+          {/* 목록 스크롤 */}
+
+          <div
+            className="
+              flex-1
+              min-h-0
+              overflow-y-auto
+              px-4
+              py-2
+            "
+          >
+
             {filteredNotes.length ===
               0 && (
+
               <p
                 className="
                   text-gray-400
                   text-sm
+                  py-3
                 "
               >
                 저장된 내용이 없음
               </p>
+
             )}
 
             {filteredNotes.map(
-              (note) => (
-                <div
-                  key={note.id}
-                  className="
-                    border-b
-                    pb-4
-                    mb-4
-                  "
-                >
+              (note) => {
+                const isFigure =
+                  note.type ===
+                  "figure";
 
+                const isHovered =
+                  hoveredNoteId ===
+                  note.id;
+
+                return (
                   <div
-                    className="
-                      font-semibold
-                      break-words
-                    "
-                  >
-                    {note.type ===
-                    "figure"
-                      ? `Figure · Page ${note.page}`
-                      : note.text}
-                  </div>
+                    key={
+                      note.id
+                    }
 
-                  <div
                     className="
-                      text-sm
-                      text-gray-600
-                      mt-2
-                      whitespace-pre-wrap
+                      relative
+                      border-b
                     "
-                  >
-                    {note.memo}
-                  </div>
 
-                  <button
-                    className="
-                      text-xs
-                      text-red-500
-                      mt-2
-                    "
-                    onClick={() =>
-                      deleteNote(
-                        note
+                    onMouseEnter={() =>
+                      setHoveredNoteId(
+                        note.id
+                      )
+                    }
+
+                    onMouseLeave={() =>
+                      setHoveredNoteId(
+                        null
                       )
                     }
                   >
-                    삭제
-                  </button>
 
-                </div>
-              )
+                    <div
+                      className={`
+                        flex
+                        items-center
+                        gap-2
+                        min-h-10
+                        py-2
+
+                        ${
+                          isFigure
+                            ? "cursor-pointer hover:bg-blue-50"
+                            : "hover:bg-gray-50"
+                        }
+                      `}
+
+                      onClick={() => {
+                        if (
+                          isFigure
+                        ) {
+                          goToFigure(
+                            note
+                          );
+                        }
+                      }}
+                    >
+
+                      {/* 이름 */}
+
+                      <div
+                        className="
+                          flex-1
+                          min-w-0
+                          font-medium
+                          text-sm
+                          truncate
+                        "
+
+                        title={
+                          isFigure
+                            ? `Figure · Page ${note.page}`
+                            : note.text
+                        }
+                      >
+                        {isFigure
+                          ? `Figure · Page ${note.page}`
+                          : note.text}
+                      </div>
+
+                      {/* 수정 */}
+
+                      <button
+                        className="
+                          shrink-0
+                          text-xs
+                          text-blue-500
+                          hover:text-blue-700
+                          px-1
+                        "
+
+                        onClick={(
+                          event
+                        ) =>
+                          openEditMemo(
+                            event,
+                            note
+                          )
+                        }
+                      >
+                        수정
+                      </button>
+
+                      {/* 삭제 */}
+
+                      <button
+                        className="
+                          shrink-0
+                          text-xs
+                          text-gray-400
+                          hover:text-red-500
+                          px-1
+                        "
+
+                        onClick={(
+                          event
+                        ) => {
+                          event.stopPropagation();
+
+                          deleteNote(
+                            note
+                          );
+                        }}
+                      >
+                        삭제
+                      </button>
+
+                    </div>
+
+                    {/* Hover 메모 */}
+
+                    {isHovered && (
+                      <div
+                        className="
+                          absolute
+                          right-0
+                          top-full
+                          mt-1
+                          w-72
+                          bg-black
+                          text-white
+                          text-sm
+                          p-3
+                          rounded-lg
+                          shadow-xl
+                          z-50
+                          whitespace-pre-wrap
+                          pointer-events-none
+                        "
+                      >
+
+                        <div
+                          className="
+                            font-semibold
+                            mb-1
+                            break-words
+                          "
+                        >
+                          {isFigure
+                            ? `Figure · Page ${note.page}`
+                            : note.text}
+                        </div>
+
+                        <div>
+                          {
+                            note.memo
+                          }
+                        </div>
+
+                      </div>
+                    )}
+
+                  </div>
+                );
+              }
             )}
 
           </div>
 
         </div>
 
-        {/* ======================
-            텍스트 선택 메뉴
-        ====================== */}
+      </div>
 
-        {selectedText &&
-          pendingSelection &&
-          !showMemoBox &&
-          !figureMode && (
+      {/* ==========================
+          텍스트 선택 메뉴
+      ========================== */}
 
-            <div
-              className="
-                absolute
-                bg-white
-                border
-                rounded-lg
-                shadow-lg
-                p-2
-                flex
-                gap-2
-                z-50
-              "
-              style={{
-                left:
-                  menuPosition.x,
-
-                top:
-                  menuPosition.y,
-              }}
-              onMouseUp={(e) =>
-                e.stopPropagation()
-              }
-            >
-
-              <button
-                className="
-                  px-3
-                  py-1
-                  bg-yellow-200
-                  rounded
-                "
-                onClick={() =>
-                  startNote(
-                    "word"
-                  )
-                }
-              >
-                단어
-              </button>
-
-              <button
-                className="
-                  px-3
-                  py-1
-                  bg-red-200
-                  rounded
-                "
-                onClick={() =>
-                  startNote(
-                    "concept"
-                  )
-                }
-              >
-                개념
-              </button>
-
-              <button
-                className="
-                  px-3
-                  py-1
-                  bg-gray-200
-                  rounded
-                "
-                onClick={
-                  eraseHighlight
-                }
-              >
-                지우개
-              </button>
-
-            </div>
-          )}
-
-        {/* ======================
-            메모 입력창
-        ====================== */}
-
-        {showMemoBox && (
+      {selectedText &&
+        pendingSelection &&
+        !showMemoBox &&
+        !figureMode && (
 
           <div
             className="
               absolute
               bg-white
               border
-              rounded-xl
-              shadow-xl
-              p-4
+              rounded-lg
+              shadow-lg
+              p-2
+              flex
+              gap-2
               z-50
-              w-96
             "
+
             style={{
               left:
                 menuPosition.x,
@@ -1401,109 +2118,228 @@ export default function PdfViewer({ file }: Props) {
               top:
                 menuPosition.y,
             }}
+
             onMouseUp={(e) =>
               e.stopPropagation()
             }
           >
 
-            <div
+            <button
               className="
-                font-semibold
-                mb-1
-                break-words
+                px-3
+                py-1
+                bg-yellow-200
+                rounded
               "
-            >
-              {currentType ===
-              "figure"
-                ? selectedText
-                : selectedText}
-            </div>
 
-            <div
-              className="
-                text-xs
-                text-gray-500
-                mb-3
-              "
-            >
-              {currentType ===
-              "word"
-                ? "모르는 단어"
-                : currentType ===
-                  "concept"
-                ? "모르는 개념"
-                : "피규어 메모"}
-            </div>
-
-            <textarea
-              autoFocus
-              className="
-                w-full
-                border
-                rounded-lg
-                p-3
-                h-32
-              "
-              placeholder={
-                currentType ===
-                "word"
-                  ? "이 단어의 뜻을 적어..."
-                  : currentType ===
-                    "concept"
-                  ? "이 개념에 대해 이해한 내용을 적어..."
-                  : "이 피규어에서 중요한 내용을 적어..."
-              }
-              value={memoText}
-              onChange={(e) =>
-                setMemoText(
-                  e.target.value
+              onClick={() =>
+                startNote(
+                  "word"
                 )
               }
-            />
-
-            <div
-              className="
-                flex
-                gap-2
-                mt-3
-              "
             >
+              단어
+            </button>
 
-              <button
-                className="
-                  px-4
-                  py-2
-                  bg-black
-                  text-white
-                  rounded
-                "
-                onClick={
-                  saveMemo
-                }
-              >
-                저장
-              </button>
+            <button
+              className="
+                px-3
+                py-1
+                bg-red-200
+                rounded
+              "
 
-              <button
-                className="
-                  px-4
-                  py-2
-                  bg-gray-200
-                  rounded
-                "
-                onClick={
-                  cancelMemo
-                }
-              >
-                취소
-              </button>
+              onClick={() =>
+                startNote(
+                  "concept"
+                )
+              }
+            >
+              개념
+            </button>
 
-            </div>
+            {/* 밑줄 */}
+
+            <button
+              className="
+                px-3
+                py-1
+                bg-white
+                border
+                border-gray-300
+                rounded
+                underline
+                underline-offset-2
+              "
+
+              onClick={
+                addUnderline
+              }
+            >
+              밑줄
+            </button>
+
+            <button
+              className="
+                px-3
+                py-1
+                bg-gray-200
+                rounded
+              "
+
+              onClick={
+                eraseHighlight
+              }
+            >
+              지우개
+            </button>
 
           </div>
+
         )}
 
-      </div>
+      {/* ==========================
+          메모 입력 / 수정
+      ========================== */}
+
+      {showMemoBox && (
+
+        <div
+          className="
+            absolute
+            bg-white
+            border
+            rounded-xl
+            shadow-xl
+            p-4
+            z-50
+            w-96
+          "
+
+          style={{
+            left:
+              menuPosition.x,
+
+            top:
+              menuPosition.y,
+          }}
+
+          onMouseUp={(e) =>
+            e.stopPropagation()
+          }
+        >
+
+          <div
+            className="
+              font-semibold
+              mb-1
+              break-words
+            "
+          >
+            {
+              selectedText
+            }
+          </div>
+
+          <div
+            className="
+              text-xs
+              text-gray-500
+              mb-3
+            "
+          >
+            {editingNoteId !==
+            null
+              ? "메모 수정"
+              : currentType ===
+                  "word"
+              ? "모르는 단어"
+              : currentType ===
+                  "concept"
+              ? "모르는 개념"
+              : "피규어 메모"}
+          </div>
+
+          <textarea
+            autoFocus
+
+            className="
+              w-full
+              border
+              rounded-lg
+              p-3
+              h-32
+            "
+
+            placeholder={
+              currentType ===
+              "word"
+                ? "이 단어의 뜻을 적어..."
+                : currentType ===
+                    "concept"
+                ? "이 개념에 대해 이해한 내용을 적어..."
+                : "이 피규어에서 중요한 내용을 적어..."
+            }
+
+            value={
+              memoText
+            }
+
+            onChange={(e) =>
+              setMemoText(
+                e.target.value
+              )
+            }
+          />
+
+          <div
+            className="
+              flex
+              gap-2
+              mt-3
+            "
+          >
+
+            <button
+              className="
+                px-4
+                py-2
+                bg-black
+                text-white
+                rounded
+              "
+
+              onClick={
+                saveMemo
+              }
+            >
+              {editingNoteId !==
+              null
+                ? "수정 저장"
+                : "저장"}
+            </button>
+
+            <button
+              className="
+                px-4
+                py-2
+                bg-gray-200
+                rounded
+              "
+
+              onClick={
+                cancelMemo
+              }
+            >
+              취소
+            </button>
+
+          </div>
+
+        </div>
+
+      )}
+
     </div>
   );
 }
