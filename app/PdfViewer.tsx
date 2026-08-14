@@ -1312,16 +1312,16 @@ export default function PdfViewer({ file }: Props) {
                                         rect.left,
 
                                       top:
-                                        rect.top,
+                                        rect.top + rect.height - 1,
 
                                       width:
                                         rect.width,
 
                                       height:
-                                        rect.height,
+                                        1,
 
-                                      borderBottom:
-                                        "2px solid rgba(30, 30, 30, 0.9)",
+                                      backgroundColor:
+                                        "#b91c1c",
                                     }}
                                   />
                                 );
@@ -2105,7 +2105,9 @@ export default function PdfViewer({ file }: Props) {
               border
               rounded-lg
               shadow-lg
-              p-2
+              pt-7
+              pb-2
+              px-2
               flex
               gap-2
               z-50
@@ -2123,6 +2125,27 @@ export default function PdfViewer({ file }: Props) {
               e.stopPropagation()
             }
           >
+
+            <button
+              type="button"
+              aria-label="선택 메뉴 닫기"
+              className="
+                absolute
+                top-1
+                right-2
+                text-lg
+                leading-none
+                text-gray-400
+                hover:text-black
+              "
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                clearSelection();
+              }}
+            >
+              ×
+            </button>
 
             <button
               className="
